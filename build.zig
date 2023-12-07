@@ -1,25 +1,16 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    if (b.option(bool, "clean", "clean out and cache") orelse false) {
-        const cmds = .{
-            .{ "rm", "-rf", "zig-cache" },
-            .{ "rm", "-rf", "zig-out" },
-        };
-        inline for (cmds) |cmd| {
-            var proc = std.process.Child.init(&cmd, b.allocator);
-            _ = try proc.spawnAndWait();
-        }
-    }
+    const optimize = b.standardOptimizeOption(.{});
 
-    var exe = b.addExecutable(.{
+    const exe = b.addExecutable(.{
         .name = "miskefi",
         .root_source_file = .{ .path = "src/main.zig" },
         .target = .{
             .cpu_arch = .x86_64,
             .os_tag = .uefi,
         },
-        .optimize = .ReleaseSmall,
+        .optimize = optimize,
     });
 
     const install = b.addInstallArtifact(exe, .{});
@@ -37,12 +28,18 @@ pub fn build(b: *std.Build) !void {
     });
     esp_cmd.step.dependOn(&install.step);
 
+    const bios = b.option(
+        []const u8,
+        "bios",
+        "Path to OVMF_CODE.fd",
+    ) orelse "/usr/share/edk2-ovmf/OVMF_CODE.fd";
+
     const qemu_cmd = b.addSystemCommand(&.{
         "qemu-system-x86_64",
-        "-bios",
-        "/usr/share/edk2-ovmf/OVMF_CODE.fd",
         "-drive",
-        "file=fat:rw:" ++ esp ++ ",format=raw",
+        try std.fmt.allocPrint(b.allocator, "file={s},if=pflash,format=raw,readonly=on", .{bios}),
+        "-drive",
+        try std.fmt.allocPrint(b.allocator, "file=fat:rw:{s},format=raw", .{esp}),
         "-monitor",
         "stdio",
     });
